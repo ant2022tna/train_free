@@ -26,6 +26,12 @@ async def main(args):
         from training_free_grpo.web.prompts import PROBLEM_WITH_EXPERIENCE_TEMPLATE
         from training_free_grpo.web.experience import ExperienceUpdater
         config_name = "simple/base_search.yaml"
+    elif args.domain == "medical":
+        from training_free_grpo.medical.dataset import load_data
+        from training_free_grpo.medical.verify import verify_func
+        from training_free_grpo.medical.prompts import PROBLEM_WITH_EXPERIENCE_TEMPLATE
+        from training_free_grpo.medical.experience import ExperienceUpdater
+        config_name = "simple/base_medical.yaml"
     else:
         raise ValueError(f"Unsupported domain: {args.domain}")
     
@@ -165,7 +171,7 @@ async def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training-free GRPO")
     parser.add_argument("--mode", type=str, default="agent", required=True, choices=["prompt", "agent"], help="Mode of inference")
-    parser.add_argument("--domain", type=str, required=True, choices=["math", "web"], help="domain of the tasks (math/web)")
+    parser.add_argument("--domain", type=str, required=True, choices=["math", "web","medical"], help="domain of the tasks (math/web/medical)")
     parser.add_argument("--experiment_name", type=str, required=True, help="name of experiment run")
     parser.add_argument("--dataset", type=str, required="True", help="Name of dataset")
     parser.add_argument("--dataset_truncate", type=int, default=None, help="Truncate dataset to first N samples")

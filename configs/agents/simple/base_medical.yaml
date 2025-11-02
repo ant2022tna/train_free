@@ -1,0 +1,22 @@
+# @package _global_
+defaults:
+  - /model/base@model
+  - _self_
+
+agent:
+  name: medical-base
+  instructions: |-
+    Solve the following problem step by step. 
+    The last part of your final response should be in the following format:
+    <answer>
+    'The final answer goes here.'
+    </answer>
+
+max_turns: 1
+
+model:
+  model_settings:
+    temperature: 0.3
+    top_p: 0.95
+    extra_args:
+      timeout: 3000
