@@ -1,0 +1,13 @@
+python train.py \
+    --mode agent \
+    --domain medical \
+    --experiment_name MP_health_ori_mmlu-clinical_knowledge_nogt   \
+    --dataset MP_health_ori_mmlu-clinical_knowledge  \
+    --epochs 3 \
+	--dataset_truncate 72 \
+    --batchsize 72 \
+    --grpo_n 5 \
+    --rollout_concurrency 128 \
+    --rollout_temperature 0.7 \
+    --task_timeout 1800  \
+	--given_ground_truth False
