@@ -181,7 +181,7 @@ if __name__ == "__main__":
     parser.add_argument("--grpo_n", type=int, default=5, help="number of rollouts in a group of GRPO")
     parser.add_argument("--rollout_concurrency", type=int, default=5, help="Concurrency level for rollouts")
     parser.add_argument("--rollout_temperature", type=float, default=0.7, help="Temperature for the LLM")
-    parser.add_argument("--rollout_max_tokens", type=int, default=16384, help="Max tokens for each rollout batch")
+    parser.add_argument("--rollout_max_tokens", type=int, default=8192, help="Max tokens for each rollout batch")
     parser.add_argument("--task_timeout", type=float, default=3600, help="Timeout for each individual task in seconds")
 
     args = parser.parse_args()

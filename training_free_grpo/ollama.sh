@@ -1,0 +1,9 @@
+#ollama stop
+export OLLAMA_NUM_PARALLEL=32 
+export OLLAMA_MAX_LOADED_MODELS=1 
+export OLLAMA_MAX_QUEUE=4096 
+export OLLAMA_FLASH_ATTENTION=1
+export PATH="/home/ubuntu/.cursor-server/cli/servers/Stable-5c17eb2968a37f66bc6662f48d6356a100b67be0/server/bin/remote-cli:/home/ubuntu/.local/bin:/home/ubuntu/anaconda3/envs/train_free/bin:/home/ubuntu/anaconda3/condabin:/usr/mpi/gcc/openmpi-4.1.7rc1/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/ubuntu/.cursor-server/extensions/ms-python.debugpy-2025.14.1-linux-x64/bundled/scripts/noConfigScripts"
+export OLLAMA_GPU_DEVICE=3
+export OLLAMA_HOST=http://127.0.0.1:11437
+ollama serve

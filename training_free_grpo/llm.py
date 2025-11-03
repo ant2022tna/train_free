@@ -11,7 +11,7 @@ class LLM:
             base_url=EnvUtils.get_env("UTU_LLM_BASE_URL"),
         )
 
-    def chat(self, messages_or_prompt, max_tokens=16384, temperature=0, max_retries=3, return_reasoning=False):
+    def chat(self, messages_or_prompt, max_tokens=8192, temperature=0, max_retries=3, return_reasoning=False):
         for _ in range(max_retries):
             try:
                 if isinstance(messages_or_prompt, str):
@@ -26,6 +26,10 @@ class LLM:
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    top_p=1,
+                    # presence_penalty=0,
+                    # frequency_penalty=0,
+                    seed=42,
                 )
                 response_text = response.choices[0].message.content.strip()
 

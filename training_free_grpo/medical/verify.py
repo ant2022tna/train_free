@@ -98,6 +98,77 @@ def eval_for_multiple_choice(input_text: str, final_answer: str, target: str) ->
         
     return False
 
+def classify_answer(input_text: str, final_answer: str) -> str:
+    """
+    Classifies the final answer to a multiple choice option.
+
+    Args:
+        input_text (str): The original question text including options.
+        final_answer (str): The model's answer.
+
+    Returns:
+        str: The classified option letter (e.g., "A", "B") or an empty string if it cannot be determined.
+    """
+    if not final_answer:
+        return ""
+
+    def clean_text(text: str) -> str:
+        if not text:
+            return ""
+        return text.lower().strip().replace('`', '').replace('(', '').replace(')', '')
+
+    def extract_option_text(input_text: str, option_letter: str) -> str:
+        try:
+            # Try different formats of options sections
+            options_section = ""
+            if 'options:' in input_text.lower():
+                options_section = input_text.lower().split('options:')[1].strip()
+            elif 'choices:' in input_text.lower():
+                options_section = input_text.lower().split('choices:')[1].strip()
+            
+            if not options_section:
+                # Try to find options in the format (A) text, (B) text
+                lines = input_text.lower().split('\n')
+                for i, line in enumerate(lines):
+                    if line.strip().startswith(f'({option_letter})') or line.strip().startswith(f'{option_letter})'):
+                        return line.split(')', 1)[1].strip()
+                
+            # Process the options section if found
+            for line in options_section.split('\n'):
+                line = line.strip()
+                if line.startswith(f'({option_letter})') or line.startswith(f'{option_letter})'):
+                    return line.split(')', 1)[1].strip()
+                # Handle options like "A. text" format
+                if line.startswith(f'{option_letter}.'):
+                    return line.split('.', 1)[1].strip()
+        except:
+            return ''
+        return ''
+
+    clean_answer = clean_text(final_answer)
+    possible_options = ['A', 'B', 'C', 'D', 'E']
+
+    # 1. Check for single-letter answers or formats like "A."
+    if len(clean_answer) == 1 and clean_answer.upper() in possible_options:
+        return clean_answer.upper()
+    if len(clean_answer) == 2 and clean_answer.endswith('.') and clean_answer[0].upper() in possible_options:
+        return clean_answer[0].upper()
+
+    # 2. Check for formats like "Option A" or "The answer is A"
+    words = clean_answer.split()
+    if len(words) > 0:
+        last_word = words[-1].strip('.').upper()
+        if last_word in possible_options:
+            return last_word
+
+    # 3. Match against the full text of the option
+    for option in possible_options:
+        option_text = extract_option_text(input_text, option.lower())
+        if option_text and clean_text(option_text) in clean_answer:
+            return option
+
+    return ""
+
 def extract_answer(
     response: str,
 ) -> str:

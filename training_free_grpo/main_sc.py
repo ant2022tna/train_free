@@ -9,7 +9,7 @@ import numpy as np
 from functools import partial
 
 from tqdm import tqdm
-from collections import defaultdict
+from collections import defaultdict, Counter
 from typing import Callable
 
 from utu.agents import SimpleAgent
@@ -18,6 +18,80 @@ from utu.utils import AgentsUtils
 from utu.agents.common import TaskRecorder
 from training_free_grpo.llm import LLM
 from openai import OpenAI
+
+from training_free_grpo.medical.dataset import load_data
+from training_free_grpo.medical.verify import (
+    verify_func,
+    extract_answer,
+    classify_answer,
+    eval_for_multiple_choice,
+)
+from training_free_grpo.medical.prompts import PROBLEM_WITH_EXPERIENCE_TEMPLATE
+
+
+def calculate_and_update_self_consistency(
+    rollouts: list[dict], experiment_name: str, rollout_filename: str
+) -> tuple[list[dict], dict]:
+    """
+    Calculates self-consistency, updates each rollout with SC info, and returns SC stats.
+    """
+    domain = rollout_filename.split("/")[1]
+    problem_to_rollouts = defaultdict(list)
+    for r in rollouts:
+        problem_to_rollouts[r["problem"]].append(r)
+
+    sc_rewards = []
+    sc_answers_log = {}  # For saving to a separate file
+
+    # First pass: classify all answers and add to each rollout
+    for problem, p_rollouts in problem_to_rollouts.items():
+        for r in p_rollouts:
+            extracted_answer = extract_answer(r["response"])
+            classified_answer = classify_answer(r["problem"], extracted_answer)
+            r["classified_answer"] = classified_answer
+
+    # Second pass: calculate SC answer and reward, and update all related rollouts
+    for problem, p_rollouts in problem_to_rollouts.items():
+        answers = [r["classified_answer"] for r in p_rollouts if r["classified_answer"]]
+
+        most_common_answer = ""
+        sc_reward = 0.0
+
+        if answers:
+            most_common_answer_tuple = Counter(answers).most_common(1)
+            if most_common_answer_tuple:
+                most_common_answer = most_common_answer_tuple[0][0]
+                ground_truth = p_rollouts[0]["groundtruth"]
+                reward = eval_for_multiple_choice(
+                    problem, most_common_answer, ground_truth
+                )
+                sc_reward = float(reward)
+                sc_rewards.append(sc_reward)
+
+        # Log for the separate file
+        sc_answers_log[problem] = {
+            "self_consistent_answer": most_common_answer,
+            "reward": sc_reward,
+            "all_classified_answers": answers,
+        }
+
+        # Update each rollout for this problem with the final SC info
+        for r in p_rollouts:
+            r["self_consistent_answer"] = most_common_answer
+            r["self_consistent_reward"] = sc_reward
+
+    # Save the separate log file
+    # sc_filename = f"data/{domain}/eval/sc_answers/{experiment_name}_sc_answers.json"
+    # with open(sc_filename, "w", encoding="utf-8") as f:
+    #     json.dump(sc_answers_log, f, indent=2, ensure_ascii=False)
+    # print(f"Saved self-consistency answers to {sc_filename}")
+
+    sc_stats = {}
+    if sc_rewards:
+        sc_stats["self_consistency_reward"] = np.mean(sc_rewards)
+
+    return rollouts, sc_stats
+
 
 def bootstrap_metric(
     data: list[any],
@@ -76,6 +150,8 @@ async def rollout_dataset(
     rollouts: list[dict],
     rollout_filename: str,
     verify_func: callable,
+    pass_k: int,
+    experiment_name: str,
     rollout_concurrency: int = 5,
     task_timeout: float = 3600,
     max_retries: int = 3,
@@ -238,6 +314,14 @@ FINAL ANSWER:
     pbar.close()
     print(f"Successfully processed {len(rollouts)} samples.")
 
+    # Calculate self-consistency and update rollouts
+    sc_stats = {}
+    if pass_k > 1:
+        rollouts, sc_stats = calculate_and_update_self_consistency(
+            rollouts, experiment_name, rollout_filename
+        )
+        save_rollouts(rollouts, rollout_filename)
+
     # stats
     all_rewards = []
     problem_to_scores = defaultdict(list)
@@ -307,6 +391,8 @@ FINAL ANSWER:
     stats["avg_reward"] = sum(all_rewards) / len(all_rewards) if all_rewards else 0
     stats["avg_tool_call"] = sum(num_tool_calls) / len(num_tool_calls) if num_tool_calls else 0
     
+    stats.update(sc_stats)
+
     for k, v in stats.items():
         print(f"- {k}: {v}")
     return rollouts, stats
@@ -314,20 +400,7 @@ FINAL ANSWER:
 
 async def main(args):
     # Set up domain-specific variables
-    if args.domain == "math":
-        from training_free_grpo.math.dataset import load_data
-        from training_free_grpo.math.verify import verify_func
-        from training_free_grpo.math.prompts import PROBLEM_WITH_EXPERIENCE_TEMPLATE
-        config_name = "simple/math_agent.yaml"
-    elif args.domain == "web":
-        from training_free_grpo.web.dataset import load_data
-        from training_free_grpo.web.verify import verify_func
-        from training_free_grpo.web.prompts import PROBLEM_WITH_EXPERIENCE_TEMPLATE
-        config_name = "simple/search_agent.yaml"
-    elif args.domain == "medical":
-        from training_free_grpo.medical.dataset import load_data
-        from training_free_grpo.medical.verify import verify_func
-        from training_free_grpo.medical.prompts import PROBLEM_WITH_EXPERIENCE_TEMPLATE
+    if args.domain == "medical":
         config_name = "simple/base_medical.yaml"
     else:
         raise ValueError(f"Unsupported domain: {args.domain}")
@@ -383,6 +456,8 @@ async def main(args):
         rollouts=rollouts,
         verify_func=verify_func,
         rollout_filename=rollout_filename,
+        pass_k=args.pass_k,
+        experiment_name=args.experiment_name,
         rollout_concurrency=args.rollout_concurrency,
         task_timeout=args.task_timeout,
         max_tokens=args.rollout_max_tokens,
@@ -398,7 +473,7 @@ async def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training-Free GRPO Evaluation")
     parser.add_argument("--mode", type=str, default="agent", required=True, choices=["prompt", "agent"], help="Mode of inference")
-    parser.add_argument("--domain", type=str, required=True, choices=["math", "web","medical"], help="The domain of the experiment")
+    parser.add_argument("--domain", type=str, required=True, choices=["medical"], help="The domain of the experiment")
     parser.add_argument("--experiment_name", type=str, required=True, help="Name of the experiment run")
     parser.add_argument("--dataset", type=str, required=True, help="Name of dataset")
     parser.add_argument("--dataset_truncate", type=int, default=None, help="Truncate dataset to first N samples")

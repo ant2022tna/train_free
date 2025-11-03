@@ -1,30 +1,31 @@
-# python train.py \
-#     --mode agent \
-#     --domain medical \
-#     --experiment_name medqa_ds   \
-#     --dataset medqa \
-#     --epochs 5 \
-# 	--dataset_truncate 100 \
-#     --batchsize 100 \
-#     --grpo_n 5 \
-#     --rollout_concurrency 128 \
-#     --rollout_temperature 0.7 \
-#     --task_timeout 1800  \
-
 python train.py \
     --mode agent \
     --domain medical \
-    --experiment_name MP_health_qwen_no_gt   \
-    --dataset MP_health \
+    --experiment_name medqa_ds_test  \
+    --dataset medqa \
     --epochs 3 \
-	--dataset_truncate 800 \
-    --batchsize 200 \
+	--dataset_truncate 400 \
+    --batchsize 100 \
     --grpo_n 5 \
     --rollout_concurrency 128 \
     --rollout_temperature 0.7 \
     --task_timeout 1800  \
-    --rollout_max_tokens 2048 \
-    --given_ground_truth False
+    --rollout_max_tokens 2048 
+
+# python train.py \
+#     --mode agent \
+#     --domain medical \
+#     --experiment_name MP_health_ds2_test   \
+#     --dataset MP_health \
+#     --epochs 3 \
+# 	--dataset_truncate 800 \
+#     --batchsize 200 \
+#     --grpo_n 5 \
+#     --rollout_concurrency 128 \
+#     --rollout_temperature 0.7 \
+#     --task_timeout 1800  \
+#     --rollout_max_tokens 2048 
+#     #--given_ground_truth False
 
 
 # python train.py \
