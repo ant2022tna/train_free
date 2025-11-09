@@ -12,6 +12,8 @@ from tqdm import tqdm
 from collections import defaultdict, Counter
 from typing import Callable
 
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 from utu.agents import SimpleAgent
 from utu.config import ConfigLoader
 from utu.utils import AgentsUtils
@@ -20,6 +22,7 @@ from training_free_grpo.llm_sc import LLM
 from openai import OpenAI
 
 from training_free_grpo.medical.dataset import load_data
+from training_free_grpo.medical.experience import ExperienceUpdater
 from training_free_grpo.medical.verify import (
     verify_func,
     extract_answer,
@@ -37,7 +40,7 @@ from training_free_grpo.medical.prompts import (
 import random
 
 def calculate_and_update_self_consistency(
-    rollouts: list[dict], experiment_name: str, rollout_filename: str
+    rollouts: list[dict], experiment_name: str, rollout_filename: str, cur_step_dir=None,
 ) -> tuple[list[dict], dict]:
     """
     Calculates self-consistency, updates each rollout with SC info, and returns SC stats.
@@ -91,7 +94,7 @@ def calculate_and_update_self_consistency(
             r["self_consistent_reward"] = sc_reward
 
     #Save the separate log file
-    sc_filename = f"data/{domain}/sc_answers/{experiment_name}_sc_answers.json"
+    sc_filename = os.path.join(cur_step_dir, "sc_answers.json")
     with open(sc_filename, "w", encoding="utf-8") as f:
         json.dump(sc_answers_log, f, indent=2, ensure_ascii=False)
     print(f"Saved self-consistency answers to {sc_filename}")
@@ -111,6 +114,8 @@ async def synthesize_and_evaluate_unified_responses(
     temperature: float = 0.0,
     max_tokens: int = 2048,
     formatted_experiences: str = None,
+    use_trajectory_summary: bool = False,
+    cur_step_dir=None,
 ) -> tuple[list[dict], dict]:
     """
     Synthesizes a unified response for each problem, evaluates it,
@@ -124,13 +129,23 @@ async def synthesize_and_evaluate_unified_responses(
     # Prepare prompts and keep track of the problem for each prompt
     problem_to_prompt = {}
     for problem_id, p_rollouts in sorted(problem_to_rollouts.items()):
-        trajectories_str = "\n\n".join([
-            f"Trajectory {i+1}:\n{r['response']}" 
-            for i, r in enumerate(p_rollouts)
-        ])
+        if use_trajectory_summary:
+            trajectories_str = "\n\n".join(
+                [
+                    f"Trajectory {i+1}:\n{r['trajectory_summary']}"
+                    for i, r in enumerate(p_rollouts)
+                    if "trajectory_summary" in r
+                ]
+            )
+        else:
+            trajectories_str = "\n\n".join(
+                [f"Trajectory {i+1}:\n{r['response']}" for i, r in enumerate(p_rollouts)]
+            )
 
         prompt = UNIFIED_RESPONSE_TEMPLATE2.format(
-            problem=p_rollouts[0]["problem"], trajectories=trajectories_str.strip(), experiences=formatted_experiences if formatted_experiences else "None"
+            problem=p_rollouts[0]["problem"],
+            trajectories=trajectories_str.strip(),
+            experiences=formatted_experiences if formatted_experiences else "None",
         )
         messages = [{"role": "user", "content": prompt}]
         problem_to_prompt[problem_id] = messages
@@ -150,12 +165,18 @@ async def synthesize_and_evaluate_unified_responses(
     problem_to_unified_response = dict(zip(problems_in_order, unified_responses))
 
     unified_rewards = []
+    confident_unified_rewards = []
+    all_avg_pseudo_rewards = []
+    all_selection_rates = []
     unified_answers_log = {}
+    selection_count_to_rewards = defaultdict(list)
+
     for problem_id, p_rollouts in problem_to_rollouts.items():
         full_unified_response = problem_to_unified_response.get(problem_id)
 
         reward = 0.0
         unified_response_content = ""
+        extracted_answer = ""  # Default empty
         if full_unified_response:
             # As per the prompt, the actual response is after the "# UNIFIED RESPONSE" prefix.
             if "# UNIFIED RESPONSE" in full_unified_response:
@@ -171,6 +192,34 @@ async def synthesize_and_evaluate_unified_responses(
 
         unified_rewards.append(reward)
 
+        # New: Treat unified response as pseudo-truth
+        unified_classified_answer = classify_answer(p_rollouts[0]["problem"], extracted_answer)
+
+        selection_count = 0
+        pseudo_rewards_for_problem = []
+        for r in p_rollouts:
+            pseudo_reward = 0.0
+            if "classified_answer" in r and r["classified_answer"] and unified_classified_answer:
+                if r["classified_answer"] == unified_classified_answer:
+                    pseudo_reward = 1.0
+                    selection_count += 1
+            
+            r["pseudo_reward_from_unified"] = pseudo_reward
+            pseudo_rewards_for_problem.append(pseudo_reward)
+        
+        avg_pseudo_reward = np.mean(pseudo_rewards_for_problem) if pseudo_rewards_for_problem else 0.0
+
+        selection_rate = selection_count / len(p_rollouts) if p_rollouts else 0.0
+        all_avg_pseudo_rewards.append(avg_pseudo_reward)
+        all_selection_rates.append(selection_rate)
+        selection_count_to_rewards[selection_count].append(reward)
+
+        # New: Check if the unified answer is "confident" and collect its real reward
+        is_confident =  (selection_count in [5])  # True  #  (selection_count in [3, 4, 5])
+        if is_confident:
+            confident_unified_rewards.append(reward)
+
+        # Update log with new metrics
         unified_answers_log[problem_id] = {
             "problem": p_rollouts[0]["problem"],
             "prompt": problem_to_prompt[problem_id][0]["content"],
@@ -179,21 +228,55 @@ async def synthesize_and_evaluate_unified_responses(
             "unified_response_text": full_unified_response or "Error: Synthesis failed.",
             "unified_response": unified_response_content or "Error: Synthesis failed.",
             "unified_response_reward": reward,
+            "unified_classified_answer": unified_classified_answer,
+            "unified_answer_selection_count": selection_count,
+            "avg_pseudo_reward_from_unified": avg_pseudo_reward,
+            "is_confident_unified_answer": is_confident,
         }
 
+        # Update each rollout in place
         for r in p_rollouts:
             r["unified_response"] = (
                 unified_response_content or "Error: Synthesis failed."
             )
             r["unified_response_text"] = full_unified_response or "Error: Synthesis failed."
             r["unified_response_reward"] = reward
+            r["is_confident_unified_answer"] = is_confident
+            r["unified_classified_answer"] = unified_classified_answer
+            # pseudo_reward_from_unified is already set
 
     synth_stats = {}
     if unified_rewards:
         synth_stats["unified_response_reward"] = np.mean(unified_rewards)
 
+    # Calculate accuracy per selection count
+    selection_count_accuracies = {}
+    sorted_counts = sorted(selection_count_to_rewards.keys())
+    for count in sorted_counts:
+        rewards = selection_count_to_rewards[count]
+        if rewards:
+            accuracy = np.mean(rewards)
+            selection_count_accuracies[f"accuracy_at_selection_count_{count}"] = accuracy
+            selection_count_accuracies[f"num_samples_at_selection_count_{count}"] = len(rewards)
+
+    synth_stats.update(selection_count_accuracies)
+
+    # if all_avg_pseudo_rewards:
+    #     synth_stats["avg_pseudo_reward_from_unified"] = np.mean(all_avg_pseudo_rewards)
+    # if all_selection_rates:
+    #     synth_stats["avg_unified_answer_selection_rate"] = np.mean(all_selection_rates)
+    if confident_unified_rewards:
+        synth_stats["confident_unified_response_accuracy"] = np.mean(confident_unified_rewards)
+    else:
+        synth_stats["confident_unified_response_accuracy"] = 0.0
+
+    # Add count of confident samples
+    synth_stats["num_confident_samples"] = len(confident_unified_rewards)
+    synth_stats["total_samples"] = len(problem_to_rollouts)
+
+
     # Save the separate log file
-    unified_filename = f"data/{domain}/unified_answers/{experiment_name}_unified_answers.json"
+    unified_filename = os.path.join(cur_step_dir, "unified_answers.json")
     os.makedirs(os.path.dirname(unified_filename), exist_ok=True)
     with open(unified_filename, "w", encoding="utf-8") as f:
         json.dump(unified_answers_log, f, indent=2, ensure_ascii=False)
@@ -267,6 +350,8 @@ async def rollout_dataset(
     temperature: float = 0.0,
     max_tokens: int = 2048,
     formatted_experiences: str = None,
+    use_trajectory_summary_for_synthesis: bool = False,
+    cur_step_dir=None,
 ) -> list[dict]:
     """Rollout the dataset using the worker agent with concurrency control, timeout, error handling, and retries."""
 
@@ -372,7 +457,7 @@ FINAL ANSWER:
                 task_end_time = time.time()
                 sample.update(
                     {
-                        "response": res.final_output,
+                        "response": res.final_output or "",
                         "trajectories": res.trajectories,
                         "error": None,
                         "rollout_time": task_end_time - task_start_time,
@@ -428,10 +513,44 @@ FINAL ANSWER:
     sc_stats, synth_stats = {}, {}
     if pass_k > 1:
         rollouts, sc_stats = calculate_and_update_self_consistency(
-            rollouts, experiment_name, rollout_filename
+            rollouts, experiment_name, rollout_filename, cur_step_dir
         )
+
+        if use_trajectory_summary_for_synthesis:
+            print("Generating trajectory summaries for synthesis...")
+            domain = rollout_filename.split("/")[1]
+            summary_save_dir = cur_step_dir
+            os.makedirs(summary_save_dir, exist_ok=True)
+
+            exp_updater = ExperienceUpdater()
+            problem_to_summarized_rollouts = exp_updater._single_rollout_summary(
+                rollouts=rollouts,
+                save_dir=summary_save_dir,
+                max_workers=rollout_concurrency,
+                given_ground_truth=False,
+                only_partial_correct=False,
+            )
+
+            summary_map = {}
+            for _, summarized_rollouts in problem_to_summarized_rollouts.items():
+                for summarized_rollout in summarized_rollouts:
+                    if "runid" in summarized_rollout and "trajectory_summary" in summarized_rollout:
+                        summary_map[summarized_rollout["runid"]] = summarized_rollout["trajectory_summary"]
+
+            for rollout in rollouts:
+                if rollout["runid"] in summary_map:
+                    rollout["trajectory_summary"] = summary_map[rollout["runid"]]
+
         rollouts, synth_stats = await synthesize_and_evaluate_unified_responses(
-            rollouts, rollout_concurrency, experiment_name, domain='medical', temperature=temperature, max_tokens=max_tokens, formatted_experiences=formatted_experiences
+            rollouts,
+            rollout_concurrency,
+            experiment_name,
+            domain="medical",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            formatted_experiences=formatted_experiences,
+            use_trajectory_summary=use_trajectory_summary_for_synthesis,
+            cur_step_dir=cur_step_dir,
         )
         save_rollouts(rollouts, rollout_filename)
 
@@ -530,6 +649,9 @@ async def main(args):
     else:
         raise ValueError(f"Unsupported inference mode: {args.mode}")
 
+    cur_step_dir = os.path.join("data", args.domain, "eval", args.experiment_name)
+    os.makedirs(cur_step_dir, exist_ok=True)
+
     # Load the dataset
     test_data = load_data(args.dataset)
     print(f"Loaded {len(test_data)} records from dataset")
@@ -539,22 +661,121 @@ async def main(args):
         test_data = random.sample(test_data, args.dataset_truncate)
     
     # Insert experiences
-    formatted_experiences = None
     if args.experience_file:
-        experiences = json.load(open(args.experience_file))
-        formatted_experiences = "\n".join([ f"[{i}]. {e}" for i, e in experiences.items() ])
-        formatted_test_data = [{
-            "prompt": PROBLEM_WITH_EXPERIENCE_TEMPLATE.format(
-                experiences=formatted_experiences if formatted_experiences else "None",
-                problem=each["problem"],
-            ),
-            **each
-        } for each in test_data]
+        if not args.retrieval_dataset:
+            raise ValueError("--retrieval_dataset must be provided when using --experience_file for retrieval.")
+        
+        print("Retrieving and synthesizing experiences for each test problem...")
+        llm = LLM()
+        experience_updater = ExperienceUpdater()
+
+        # 1. Load retrieval data and experiences
+        retrieval_data = load_data(args.retrieval_dataset)
+        with open(args.experience_file) as f:
+            per_problem_experiences = {k: v for k, v in json.load(f).items()} # Handle int keys if they are strings
+        
+        for i, sample in enumerate(retrieval_data):
+            sample["problem_id"] = sample.get("id", i)
+
+        # 2. Create embeddings for retrieval problems
+        print("Generating embeddings for retrieval problems...")
+        retrieval_problems_text = [p['problem'] for p in retrieval_data]
+        retrieval_problem_embeddings = llm.get_embeddings(retrieval_problems_text)
+        
+        problem_store = {
+            retrieval_data[i]["problem_id"]: {
+                "data": retrieval_data[i],
+                "embedding": retrieval_problem_embeddings[i],
+            }
+            for i in range(len(retrieval_data)) if retrieval_problem_embeddings[i] is not None
+        }
+        print(f"Successfully created embeddings for {len(problem_store)} retrieval problems.")
+
+        # 3. Create embeddings for test problems
+        print("Generating embeddings for test problems...")
+        test_problems_text = [p['problem'] for p in test_data]
+        test_problem_embeddings = llm.get_embeddings(test_problems_text)
+
+        # 4. For each test problem, retrieve, synthesize, and format
+        problem_embeddings_matrix = np.array([p["embedding"] for p in problem_store.values()])
+        problem_ids_for_retrieval = list(problem_store.keys())
+
+        synthesis_requests = []
+        for i, test_sample in enumerate(test_data):
+            test_sample['problem_id'] = test_sample.get("id", i)
+            current_problem_embedding = test_problem_embeddings[i]
+            
+            similarities = cosine_similarity([current_problem_embedding], problem_embeddings_matrix)[0]
+            sorted_indices = np.argsort(similarities)[::-1]
+            
+            retrieved_experiences = {}
+            for idx in sorted_indices:
+                retrieved_problem_id = problem_ids_for_retrieval[idx]
+                str_retrieved_problem_id = str(retrieved_problem_id)
+
+                if args.skip_identical_problems_for_retrieval:
+                    # 如果检索到的问题和现状的问题内容相同则跳过
+                    retrieved_problem_text = problem_store[retrieved_problem_id]["data"]["problem"]
+                    target_problem_text = test_sample["problem"]
+                    if retrieved_problem_text.strip() == target_problem_text.strip():
+                        continue
+
+                if str_retrieved_problem_id in per_problem_experiences:
+                    retrieved_experiences[str_retrieved_problem_id] = per_problem_experiences[str_retrieved_problem_id]
+                
+                if len(retrieved_experiences) >= 3:
+                    break
+            synthesis_requests.append({
+                "target_problem": test_sample["problem"],
+                "retrieved_experiences": retrieved_experiences,
+            })
+
+        print(f"Synthesizing experiences for {len(synthesis_requests)} test problems...")
+        batch_synthesized_experiences, synthesis_prompts = await experience_updater.synthesize_retrieved_experiences_batch_async(
+            synthesis_requests, 
+            concurrency=args.rollout_concurrency
+        )
+        
+        # 5. Format test data with synthesized experiences and log
+        formatted_test_data = []
+        synthesis_log_data = []
+        for i, problem_sample in enumerate(test_data):
+            synthesized_experiences = batch_synthesized_experiences[i]
+            formatted_experiences_str = "\n".join([f"[{k}]. {v}" for k, v in synthesized_experiences.items()])
+            
+            final_prompt = PROBLEM_WITH_EXPERIENCE_TEMPLATE.format(
+                experiences=formatted_experiences_str if formatted_experiences_str else "None",
+                problem=problem_sample["problem"],
+            )
+
+            formatted_sample = {
+                "prompt": final_prompt,
+                **problem_sample
+            }
+            formatted_test_data.append(formatted_sample)
+
+            synthesis_log_data.append({
+                "target_problem": synthesis_requests[i]["target_problem"],
+                "retrieved_experiences": synthesis_requests[i]["retrieved_experiences"],
+                "synthesis_prompt": synthesis_prompts[i] if i < len(synthesis_prompts) else "N/A",
+                "synthesized_experiences": synthesized_experiences,
+                "final_prompt": final_prompt,
+            })
+
+        synthesis_log_filename = os.path.join(cur_step_dir, "synthesis_log.json")
+        with open(synthesis_log_filename, "w", encoding="utf-8") as f:
+            json.dump(synthesis_log_data, f, indent=2, ensure_ascii=False)
+        print(f"Saved synthesis log to {synthesis_log_filename}")
+        
+        # This will be used by rollout_dataset later
+        formatted_experiences = "SYNTHESIZED_PER_PROBLEM" 
+
     else:
         formatted_test_data = [{
             "prompt": each["problem"],
             **each
         } for each in test_data]
+        formatted_experiences = None # Ensure it's None when no experience file
     
     # Add a unique ID to each problem before duplication
     for i, sample in enumerate(formatted_test_data):
@@ -563,10 +784,9 @@ async def main(args):
     # Duplicate for Pass@k evaluation
     formatted_test_data = formatted_test_data * args.pass_k
     print(f"Duplicated to {len(formatted_test_data)} records for Pass@{args.pass_k} evaluation")
-
+    
     # Load existing rollouts
-    os.makedirs(f"data/{args.domain}/eval", exist_ok=True)
-    rollout_filename = f"data/{args.domain}/eval/{args.experiment_name}.jsonl"
+    rollout_filename = os.path.join(cur_step_dir, "rollouts.jsonl")
     rollouts = load_rollouts(rollout_filename)
 
     # Rollout the dataset
@@ -582,6 +802,8 @@ async def main(args):
         task_timeout=args.task_timeout,
         max_tokens=args.rollout_max_tokens,
         formatted_experiences=formatted_experiences,
+        use_trajectory_summary_for_synthesis=args.use_trajectory_summary_for_synthesis,
+        cur_step_dir=cur_step_dir,
     )
 
     #保存设置到stats中
@@ -596,12 +818,13 @@ async def main(args):
     stats["experience_file"] = args.experience_file
     stats["dataset"] = args.dataset
     stats["dataset_truncate"] = args.dataset_truncate
+    stats["use_trajectory_summary_for_synthesis"] = args.use_trajectory_summary_for_synthesis
+    stats["skip_identical_problems_for_retrieval"] = args.skip_identical_problems_for_retrieval
 
 
 
     #保存stats
-    os.makedirs(f"data/{args.domain}/eval", exist_ok=True)
-    stats_filename = f"data/{args.domain}/eval/{args.experiment_name}_stats.json"
+    stats_filename = os.path.join(cur_step_dir, "stats.json")
     json.dump(stats, open(stats_filename, "w"), indent=2)
     print(f"Saved stats to {stats_filename}")
 
@@ -614,11 +837,14 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, required=True, help="Name of dataset")
     parser.add_argument("--dataset_truncate", type=int, default=None, help="Truncate dataset to first N samples")
     parser.add_argument("--experience_file", type=str, default=None)
+    parser.add_argument("--retrieval_dataset", type=str, default=None, help="Dataset used for generating experiences, for retrieval.")
     parser.add_argument("--rollout_concurrency", type=int, default=5, help="Concurrency level for rollouts")
     parser.add_argument("--rollout_temperature", type=float, default=0.0, help="Temperature for the LLM")
     parser.add_argument("--rollout_max_tokens", type=int, default=8192, help="Max tokens for each rollout")
     parser.add_argument("--pass_k", type=int, default=1, help="Pass@k metric")
     parser.add_argument("--task_timeout", type=float, default=3600, help="Timeout for each individual task in seconds")
+    parser.add_argument("--use_trajectory_summary_for_synthesis", action="store_true", help="Use trajectory summary for synthesis instead of raw response.")
+    parser.add_argument("--skip_identical_problems_for_retrieval", action="store_true", help="Skip retrieving experiences from problems with identical content.")
 
     args = parser.parse_args()
     asyncio.run(main(args))

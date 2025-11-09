@@ -12,7 +12,8 @@ class LLM:
         )
 
     def chat(self, messages_or_prompt, max_tokens=8192, temperature=0, max_retries=3, return_reasoning=False):
-        for _ in range(max_retries):
+        retries = 0
+        while retries < max_retries:
             try:
                 if isinstance(messages_or_prompt, str):
                     messages = [{"role": "user", "content": messages_or_prompt}]
@@ -30,6 +31,7 @@ class LLM:
                     # presence_penalty=0,
                     # frequency_penalty=0,
                     seed=42,
+                    timeout=100.0,
                 )
                 response_text = response.choices[0].message.content.strip()
 
@@ -39,6 +41,10 @@ class LLM:
                 return response_text
 
             except Exception as e:
-                error = f"An unexpected error occurred: {e}"
-                print(error)
-            time.sleep(10)
+                retries += 1
+                print(f"API调用失败 (尝试 {retries}/{max_retries}): {type(e).__name__}: {str(e)}")
+                if retries >= max_retries:
+                    print(f"API调用在 {max_retries} 次重试后最终失败")
+                    return ""  # Return empty string instead of None
+                time.sleep(3)
+        return ""  # Return empty string instead of None

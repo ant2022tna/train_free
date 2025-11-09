@@ -1,7 +1,8 @@
-python train_sc.py \
+
+python train_sc2.py \
     --mode agent \
     --domain medical \
-    --experiment_name MP_health100_ds_sc_1_tt_40exp_scref2-2   \
+    --experiment_name MP_health100_ds_sc_1_tt_diff_sc2ref2-4   \
     --dataset MP_health \
     --epochs 6 \
 	--dataset_truncate 100 \
@@ -11,5 +12,6 @@ python train_sc.py \
     --rollout_temperature 0.7 \
     --task_timeout 1800  \
     --rollout_max_tokens 2048 \
-    --given_ground_truth False
+    --given_ground_truth False \
+    --use_trajectory_summary_for_synthesis
 

@@ -146,7 +146,7 @@ def classify_answer(input_text: str, final_answer: str) -> str:
         return ''
 
     clean_answer = clean_text(final_answer)
-    possible_options = ['A', 'B', 'C', 'D', 'E']
+    possible_options = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
 
     # 1. Check for single-letter answers or formats like "A."
     if len(clean_answer) == 1 and clean_answer.upper() in possible_options:

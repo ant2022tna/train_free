@@ -11,13 +11,13 @@
 #     --rollout_temperature 0.7 \
 #     --task_timeout 1800  \
 
-python train.py \
+python train_sc.py \
     --mode agent \
     --domain medical \
-    --experiment_name NEJMQA_ds_bs100   \
-    --dataset NEJMQA \
-    --epochs 1 \
-	--dataset_truncate 600 \
+    --experiment_name MP_health100_ds_sc_5   \
+    --dataset MP_health \
+    --epochs 6 \
+	--dataset_truncate 100 \
     --batchsize 100 \
     --grpo_n 5 \
     --rollout_concurrency 128 \

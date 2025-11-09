@@ -24,13 +24,15 @@
 #     --rollout_max_tokens 8000
 
 
-
 python main.py \
-    --mode prompt \
+    --mode agent \
     --domain medical \
-    --experiment_name MP_health_qwen72b \
-    --dataset MP_health \
+    --experiment_name medqa_gpt4o \
+    --dataset medqa \
     --rollout_concurrency 128 \
-    --pass_k 1 
-
-    # --experience_file /home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health_ds2_test/step_3/experiences.json \
+    --pass_k 1  
+    #--experience_file /home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health/step_4/experiences.json
+    #/home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/NEJMQA_ds_bs200/step_4/experiences.json
+    #/home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health800_200_ds_sc_1_tt_all_scref2-pel/step_5/experiences.json
+    #/home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health100_ds_sc_1_tt_7_all/step_4/experiences.json
+    #/home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health_ds2/step_4/experiences.json

@@ -145,18 +145,12 @@ class ExperienceUpdater:
 
         all_rollouts = []
         for rollouts in problem_to_summarized_rollouts.values():
-            if  only_partial_correct:
+            if given_ground_truth and only_partial_correct:
                 # only for those partially correct
-                if given_ground_truth:
-                    scores = [each["reward"] for each in rollouts]
-                    avg_score = sum(scores) / len(scores)
-                    if avg_score > 0 and avg_score < 1:
-                        all_rollouts.append(rollouts)
-                else:
-                    #只要他们的答案不是完全一样的
-                    self_consistent_answer = [each["self_consistent_answer"] for each in rollouts]
-                    if len(set(self_consistent_answer)) > 1:
-                        all_rollouts.append(rollouts)   
+                scores = [each["reward"] for each in rollouts]
+                avg_score = sum(scores) / len(scores)
+                if avg_score > 0 and avg_score < 1:
+                    all_rollouts.append(rollouts)
             else:
                 all_rollouts.append(rollouts)
 
@@ -228,7 +222,10 @@ class ExperienceUpdater:
         # collect operations
         all_operations = []
         for each in critiques:
-            all_operations.extend(each["operations"])
+            try:
+                all_operations.extend(each["operations"])
+            except:
+                print(f"Warning: failed to decode operation: {each}")
         print("- Num of operations to process:", len(all_operations))
 
         # split experiences
@@ -236,12 +233,15 @@ class ExperienceUpdater:
         to_modify = []
         max_ID = 0
         for operation in all_operations:
-            if operation["option"] == "modify":
-                if operation["modified_from"] in candidate_experiences:
-                    to_modify.append(operation)
-            elif operation["option"] == "add":
-                candidate_experiences[f"C{max_ID}"] = operation["experience"]
-                max_ID += 1
+            try:
+                if operation["option"] == "modify":
+                    if operation["modified_from"] in candidate_experiences:
+                        to_modify.append(operation)
+                elif operation["option"] == "add":
+                    candidate_experiences[f"C{max_ID}"] = operation["experience"]
+                    max_ID += 1
+            except:
+                print(f"Warning: failed to decode operation: {operation}")
 
         print("- Num of added experiences:", max_ID)
         print("- Num of experiences to be modified:", len(to_modify))

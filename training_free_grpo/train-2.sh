@@ -1,16 +1,17 @@
 python train.py \
     --mode agent \
     --domain medical \
-    --experiment_name medqa_ds_test  \
+    --experiment_name medqa_ds_test-2  \
     --dataset medqa \
     --epochs 3 \
-	--dataset_truncate 400 \
+	--dataset_truncate 100 \
     --batchsize 100 \
     --grpo_n 5 \
     --rollout_concurrency 128 \
     --rollout_temperature 0.7 \
     --task_timeout 1800  \
-    --rollout_max_tokens 2048 
+    --rollout_max_tokens 2048   \
+    --given_ground_truth False
 
 # python train.py \
 #     --mode agent \
