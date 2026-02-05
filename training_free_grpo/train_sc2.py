@@ -99,6 +99,7 @@ async def main(args):
         else:
             print(f"Shuffling data ...")
             shuffled_data = copy.deepcopy(train_data)
+            random.seed(42 + epoch)
             random.shuffle(shuffled_data)
             with open(shuffled_filename, "w") as f:
                 for each in shuffled_data:

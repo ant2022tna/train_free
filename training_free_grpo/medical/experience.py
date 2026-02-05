@@ -136,16 +136,16 @@ class ExperienceUpdater:
                     trajectories=formatted_trajectories,
                     answer=representative_rollout.get("unified_classified_answer", ""),
                 )
-            elif "unified_response" in representative_rollout:
-                formatted_trajectories = "\n\n".join(
-                [f"Trajectory {i+1}:\n{r['trajectory_summary']}" for i, r in enumerate(summarized_rollouts)]
-            )
-                prompt = PER_PROBLEM_EXPERIENCE_UPDATE_TEMPLATE2_0.format(
-                    problem=problem_text,
-                    experiences=formatted_experiences,
-                    trajectories=formatted_trajectories,
-                    unified_response=representative_rollout.get("unified_response", ""),
-                )
+            # elif "unified_response" in representative_rollout:
+            #     formatted_trajectories = "\n\n".join(
+            #     [f"Trajectory {i+1}:\n{r['trajectory_summary']}" for i, r in enumerate(summarized_rollouts)]
+            # )
+            #     prompt = PER_PROBLEM_EXPERIENCE_UPDATE_TEMPLATE2_0.format(
+            #         problem=problem_text,
+            #         experiences=formatted_experiences,
+            #         trajectories=formatted_trajectories,
+            #         unified_response=representative_rollout.get("unified_response", ""),
+            #     )
             else:
                 formatted_trajectories = "\n\n".join(
                 [f"Trajectory {i+1}:\n{r['trajectory_summary']}" for i, r in enumerate(summarized_rollouts)]
@@ -337,12 +337,12 @@ class ExperienceUpdater:
                         grade="This trajectory delivers **" + ("correct" if cur.get("pseudo_reward_from_unified") else "wrong") + "** answer",
                         answer=cur.get("unified_classified_answer", "")
                     )
-                elif "unified_response" in cur:
-                    prompt = SINGLE_ROLLOUT_SUMMARY_NO_GT_TEMPLATE2.format(
-                        problem=cur["problem"],
-                        trajectory=cur["trajectories"][0]["trajectory"],
-                        unified_response=cur.get("unified_response", "")
-                    )
+                # elif "unified_response" in cur:
+                #     prompt = SINGLE_ROLLOUT_SUMMARY_NO_GT_TEMPLATE2.format(
+                #         problem=cur["problem"],
+                #         trajectory=cur["trajectories"][0]["trajectory"],
+                #         unified_response=cur.get("unified_response", "")
+                #     )
                 else:
                     prompt = SINGLE_ROLLOUT_SUMMARY_NO_GT_TEMPLATE3.format(
                         problem=cur["problem"],
@@ -413,30 +413,46 @@ class ExperienceUpdater:
         def process(rollouts_per_problem):
             try:
                 problem = rollouts_per_problem[0]["problem"]
-                answer = rollouts_per_problem[0]["groundtruth"]
-                formatted_trajectories = "\n\n".join([
-                    f"Trajectory {i+1} (Answer {'correct' if each["reward"] else 'wrong'}):\n{each['trajectory_summary']}"
-                    for i, each in enumerate(rollouts_per_problem)
-                ])
                 formatted_experiences = "\n".join([ f"[{i}]. {e}" for i, e in experiences.items() ]) if experiences else "None"
-                response = self.llm.chat(
-                    SINGLE_QUERY_CRITIQUE_TEMPLATE.format(
+
+                if given_ground_truth:
+                    answer = rollouts_per_problem[0]["groundtruth"]
+                    formatted_trajectories = "\n\n".join([
+                        f"Trajectory {i+1} (Answer {'correct' if each['reward'] else 'wrong'}):\n{each['trajectory_summary']}"
+                        for i, each in enumerate(rollouts_per_problem)
+                    ])
+                    prompt = SINGLE_QUERY_CRITIQUE_TEMPLATE.format(
                         max_operations=max_operations,
                         problem=problem,
                         trajectories=formatted_trajectories,
                         answer=answer,
                         experiences=formatted_experiences,
-                    ) if given_ground_truth else
-                    SINGLE_QUERY_CRITIQUE_NO_GT_TEMPLATE2.format(
+                    )
+                elif rollouts_per_problem[0].get("is_confident_unified_answer"):
+                    answer = rollouts_per_problem[0].get("unified_classified_answer", "")
+                    formatted_trajectories = "\n\n".join([
+                        f"Trajectory {i+1} (Answer {'correct' if each.get('pseudo_reward_from_unified') else 'wrong'}):\n{each['trajectory_summary']}"
+                        for i, each in enumerate(rollouts_per_problem)
+                    ])
+                    prompt = SINGLE_QUERY_CRITIQUE_TEMPLATE.format(
                         max_operations=max_operations,
                         problem=problem,
-                        trajectories="\n\n".join([
-                            f"Trajectory {i+1}:\n{each['trajectory_summary']}" for i, each in enumerate(rollouts_per_problem)
-                        ]),
+                        trajectories=formatted_trajectories,
+                        answer=answer,
                         experiences=formatted_experiences,
-                        unified_response=rollouts_per_problem[0]["unified_response"],
-                    ) if rollouts_per_problem[0].get("unified_response") else 
-                    SINGLE_QUERY_CRITIQUE_NO_GT_TEMPLATE.format(
+                    )
+                # elif rollouts_per_problem[0].get("unified_response"):
+                #     prompt = SINGLE_QUERY_CRITIQUE_NO_GT_TEMPLATE2.format(
+                #         max_operations=max_operations,
+                #         problem=problem,
+                #         trajectories="\n\n".join([
+                #             f"Trajectory {i+1}:\n{each['trajectory_summary']}" for i, each in enumerate(rollouts_per_problem)
+                #         ]),
+                #         experiences=formatted_experiences,
+                #         unified_response=rollouts_per_problem[0]["unified_response"],
+                #     )
+                else: 
+                    prompt = SINGLE_QUERY_CRITIQUE_NO_GT_TEMPLATE.format(
                         max_operations=max_operations,
                         problem=problem,
                         trajectories="\n\n".join([
@@ -444,7 +460,8 @@ class ExperienceUpdater:
                         ]),
                         experiences=formatted_experiences,
                     )
-                )
+
+                response = self.llm.chat(prompt)
                 response = response.split("```json")[-1].split("```")[0]
                 operations = json.loads(response)
                 return {"rollouts": rollouts_per_problem, "critique": response, "operations": operations[:max_operations]}

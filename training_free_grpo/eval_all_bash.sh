@@ -1,0 +1,1 @@
+bash eval_all2.sh 2>&1 | tee "./test_gpt_nj_fenke.log"

@@ -9,6 +9,7 @@
 
 #     --experience_file data/web/train/AFM_web_RL_100/step_3/experiences.json \
 
+1
 
 python main_sc2.py \
     --mode agent \
@@ -18,7 +19,7 @@ python main_sc2.py \
     --rollout_concurrency 128 \
     --pass_k 1 \
     --rollout_temperature 0 \
-    --experience_file /home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health100_ds_sc_1_tt_scref2-pel_all/step_2/experiences.json
+    --experience_file /home/nextLabUser/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health100_ds_sc_1_tt_scref2-pel_all/step_2/experiences.json
 
 #v     --dataset_truncate 250 \
 # python main.py \

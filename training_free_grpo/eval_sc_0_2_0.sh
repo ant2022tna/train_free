@@ -13,12 +13,14 @@
 python main_sc2.py \
     --mode agent \
     --domain medical \
-    --experiment_name MP_health_eval_medqa100-ds-1-5-256 \
+    --experiment_name MP_health_eval_medqa100-ds-0-5 \
     --dataset MP_health \
-    --rollout_concurrency 256 \
+    --rollout_concurrency 128 \
     --pass_k 5 \
     --rollout_temperature 0 \
-    --experience_file /home/nextLabUser/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health100_ds_sc_1_tt_scref2-pel_all/step_2/experiences.json
+
+
+    # --experience_file /home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health100_ds_sc_1_tt_scref2-pel_all/step_2/experiences.json
 
 
 #v     --dataset_truncate 250 \

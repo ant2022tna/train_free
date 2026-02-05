@@ -27,8 +27,8 @@
 python main.py \
     --mode agent \
     --domain medical \
-    --experiment_name medqa_gpt4o \
-    --dataset medqa \
+    --experiment_name MP_health_ori_mmlu-clinical_knowledge_ds \
+    --dataset MP_health_ori_mmlu-clinical_knowledge \
     --rollout_concurrency 128 \
     --pass_k 1  
     #--experience_file /home/ubuntu/yuhang2/youtu-agent/training_free_grpo/data/medical/train/MP_health/step_4/experiences.json
